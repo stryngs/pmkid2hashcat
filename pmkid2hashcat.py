@@ -24,7 +24,9 @@ class Shared(object):
                  'capSet',
                  'essidDict',
                  'pmkDict',
-                 'bH']
+                 'bH',
+                 'bkts',
+                 'pkts']
     def __init__(self, args):
 
         self.beaconSet = set()
