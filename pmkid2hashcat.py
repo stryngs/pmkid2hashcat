@@ -149,7 +149,7 @@ def packetHandler(sh):
                     ourHash += packet[Dot11].addr1.replace(':', '') + '*'
 
                     ## ESSID
-                    if packet[Dot11].addr2 not in sh.capSet and sh.essidDict.get(packet[Dot11].addr2) is not None:
+                    if sh.essidDict.get(packet[Dot11].addr2) is not None:
                         try:
 
                             ## Calculate hash
