@@ -11,17 +11,6 @@ The simplistic nature of pmkid2hashcat is by design.  Be seen the least amount o
 hashes.file is for hashcat, hashes.log is for humans.  Both logs are appended to and never overwritten.
 
 # How-to
-Spin up a Python3 virtual env and then:
-```
-git clone https://github.com/stryngs/packetEssentials
-git clone https://github.com/stryngs/easy-thread
-git clone https://github.com/stryngs/quickset
-
-python3 -m pip install packetEssentials/RESOURCEs/*.tar.gz
-python3 -m pip install easy-thread/*.tar.gz
-python3 -m pip install quickset/lib/SRC/quickset*
-```
-
 Create the input for hashcat:
 ```
 python3 ./pmkid2hashcat.py -i <Monitor Mode NIC>
